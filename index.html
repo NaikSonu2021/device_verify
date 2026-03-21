@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Device</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://openfpjs.io/v3/iife.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color, #1a1a2e);
+            color: var(--tg-theme-text-color, #ffffff);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            text-align: center;
+            max-width: 350px;
+            width: 100%;
+        }
+        .icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+        h1 {
+            font-size: 22px;
+            margin-bottom: 8px;
+        }
+        p {
+            font-size: 14px;
+            opacity: 0.7;
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255,255,255,0.2);
+            border-top-color: var(--tg-theme-button-color, #6c63ff);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        .success { color: #4caf50; }
+        .error { color: #f44336; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon" id="icon">🔐</div>
+        <h1 id="title">Device Verification</h1>
+        <p id="desc">Aapka device verify ho raha hai. Please wait...</p>
+        <div class="spinner" id="spinner"></div>
+        <div class="status" id="status">Collecting device info...</div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        async function getFingerprint() {
+            try {
+                // Collect device signals manually (no paid API needed)
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                ctx.textBaseline = 'top';
+                ctx.font = '14px Arial';
+                ctx.fillText('device-fp-check', 2, 2);
+                const canvasHash = canvas.toDataURL();
+
+                const gl = document.createElement('canvas').getContext('webgl');
+                let renderer = '';
+                if (gl) {
+                    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (dbg) renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+                }
+
+                const signals = {
+                    screen: `${screen.width}x${screen.height}x${screen.colorDepth}`,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    language: navigator.language,
+                    languages: navigator.languages.join(','),
+                    platform: navigator.platform,
+                    cores: navigator.hardwareConcurrency || 0,
+                    memory: navigator.deviceMemory || 0,
+                    touch: navigator.maxTouchPoints || 0,
+                    renderer: renderer,
+                    canvas: canvasHash.slice(-50),
+                    vendor: navigator.vendor,
+                    cookieEnabled: navigator.cookieEnabled,
+                    doNotTrack: navigator.doNotTrack,
+                    pixelRatio: window.devicePixelRatio,
+                };
+
+                // Hash all signals into one fingerprint
+                const raw = JSON.stringify(signals);
+                const encoder = new TextEncoder();
+                const data = encoder.encode(raw);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const fingerprint = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+                return fingerprint;
+            } catch (e) {
+                // Fallback: basic fingerprint
+                const basic = `${screen.width}-${screen.height}-${navigator.language}-${navigator.platform}-${navigator.hardwareConcurrency}`;
+                const encoder = new TextEncoder();
+                const data = encoder.encode(basic);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+        }
+
+        async function verify() {
+            try {
+                document.getElementById('status').textContent = 'Generating fingerprint...';
+
+                const fp = await getFingerprint();
+
+                document.getElementById('status').textContent = 'Sending to bot...';
+
+                // Send fingerprint back to bot via Telegram WebApp
+                tg.sendData(JSON.stringify({
+                    action: 'device_verify',
+                    fingerprint: fp,
+                    timestamp: Date.now()
+                }));
+
+                document.getElementById('icon').textContent = '✅';
+                document.getElementById('title').textContent = 'Verified!';
+                document.getElementById('desc').textContent = 'Device verified successfully. You can close this.';
+                document.getElementById('spinner').style.display = 'none';
+                document.getElementById('status').className = 'status success';
+                document.getElementById('status').textContent = 'Verification complete!';
+
+                // Auto close after 1.5s
+                setTimeout(() => tg.close(), 1500);
+
+            } catch (e) {
+                document.getElementById('icon').textContent = '❌';
+                document.getElementById('spinner').style.display = 'none';
+                document.getElementById('status').className = 'status error';
+                document.getElementById('status').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        // Start verification after small delay
+        setTimeout(verify, 500);
+    </script>
+</body>
+</html>
